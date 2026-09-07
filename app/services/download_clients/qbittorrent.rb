@@ -624,8 +624,39 @@ module DownloadClients
       params[:category] = config.category if config.category.present?
       params[:savepath] = options[:save_path] if options[:save_path].present?
       params[:paused] = options[:paused] ? "true" : "false" if options.key?(:paused)
+      params.merge!(share_limit_params(options))
       params.merge!(adapter_specific_add_torrent_params)
       params
+    end
+
+    # Per-torrent share limits, so a tracker's seed rules win over qBittorrent's
+    # global defaults. Omitted entirely when unknown: sending 0 would read as
+    # "stop immediately", where sending nothing leaves qBittorrent on the
+    # global limit (its -2 sentinel).
+    #
+    # Both qBittorrent's seedingTimeLimit and Prowlarr's seedTime are minutes,
+    # so no conversion is needed here.
+    def share_limit_params(options)
+      params = {}
+      ratio = positive_float(options[:ratio_limit])
+      seeding_time = positive_integer(options[:seeding_time_limit])
+      params[:ratioLimit] = ratio if ratio
+      params[:seedingTimeLimit] = seeding_time if seeding_time
+      params
+    end
+
+    def positive_float(value)
+      numeric = Float(value, exception: false)
+      return nil if numeric.nil? || numeric <= 0
+
+      numeric
+    end
+
+    def positive_integer(value)
+      numeric = Integer(value, exception: false)
+      return nil if numeric.nil? || numeric <= 0
+
+      numeric
     end
 
     def adapter_specific_add_torrent_params

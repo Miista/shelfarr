@@ -1370,7 +1370,7 @@ class DownloadJob < ApplicationJob
     torrent_hash = if search_result.from_anna_archive?
       client.add_torrent(download_url, validate_source_url: true)
     else
-      client.add_torrent(download_url)
+      client.add_torrent(download_url, seed_criteria_options(search_result))
     end
 
     if torrent_hash.present?
@@ -1448,7 +1448,7 @@ class DownloadJob < ApplicationJob
       success = external_id.present?
     else
       # qBittorrent now returns the torrent hash directly
-      external_id = client.add_torrent(download_link)
+      external_id = client.add_torrent(download_link, seed_criteria_options(search_result))
       success = external_id.present?
     end
 
@@ -1469,6 +1469,29 @@ class DownloadJob < ApplicationJob
         download_type: is_usenet ? "usenet" : "torrent"
       )
     end
+  end
+
+  # Seed rules the indexer configured in Prowlarr, translated into add_torrent
+  # options. Returns an empty hash whenever they are unknown so the download
+  # client keeps its own defaults instead of being handed a guess.
+  def seed_criteria_options(search_result)
+    return {} unless IndexerClients::Prowlarr.configured?
+
+    criteria = IndexerClients::Prowlarr.seed_criteria(search_result.indexer_id)
+    return {} unless criteria
+
+    options = {}
+    options[:ratio_limit] = criteria[:ratio] if criteria[:ratio]
+    options[:seeding_time_limit] = criteria[:seed_time] if criteria[:seed_time]
+
+    Rails.logger.info "[DownloadJob] Applying seed criteria from indexer #{search_result.indexer}: #{options.inspect}" if options.any?
+
+    options
+  rescue StandardError => e
+    # Seed limits are an optimisation over the client's defaults; never let a
+    # lookup failure block an otherwise healthy dispatch.
+    Rails.logger.warn "[DownloadJob] Failed to resolve seed criteria: #{e.message}"
+    {}
   end
 
   def claim_dispatch!(download, search_result)
