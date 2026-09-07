@@ -1370,7 +1370,7 @@ class DownloadJob < ApplicationJob
     torrent_hash = if search_result.from_anna_archive?
       client.add_torrent(download_url, validate_source_url: true)
     else
-      client.add_torrent(download_url, seed_criteria_options(search_result))
+      add_torrent_with_seed_criteria(client, download_url, search_result)
     end
 
     if torrent_hash.present?
@@ -1448,7 +1448,7 @@ class DownloadJob < ApplicationJob
       success = external_id.present?
     else
       # qBittorrent now returns the torrent hash directly
-      external_id = client.add_torrent(download_link, seed_criteria_options(search_result))
+      external_id = add_torrent_with_seed_criteria(client, download_link, search_result)
       success = external_id.present?
     end
 
@@ -1469,6 +1469,16 @@ class DownloadJob < ApplicationJob
         download_type: is_usenet ? "usenet" : "torrent"
       )
     end
+  end
+
+  # Adds the torrent, passing the indexer's seed rules only when there are any.
+  # The options argument is omitted entirely otherwise, so clients that take a
+  # single argument keep working.
+  def add_torrent_with_seed_criteria(client, url, search_result)
+    options = seed_criteria_options(search_result)
+    return client.add_torrent(url) if options.empty?
+
+    client.add_torrent(url, options)
   end
 
   # Seed rules the indexer configured in Prowlarr, translated into add_torrent
