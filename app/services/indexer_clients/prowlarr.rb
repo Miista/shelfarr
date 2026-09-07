@@ -37,6 +37,27 @@ module IndexerClients
         handle_response(response) { |data| Array(data) }
       end
 
+      # Seed criteria configured on the indexer in Prowlarr, so the download
+      # client can honour the tracker's rules. Prowlarr only exposes these on
+      # the indexer definition, never on a search result, so they have to be
+      # looked up by the result's indexerId.
+      #
+      # Returns nil when the indexer has no criteria configured or cannot be
+      # read: callers must leave the download client on its own defaults
+      # rather than substituting a guess.
+      def seed_criteria(indexer_id)
+        id = Integer(indexer_id, exception: false)
+        return nil unless id
+
+        indexer = indexers.find { |candidate| candidate["id"].to_i == id }
+        return nil unless indexer
+
+        extract_seed_criteria(indexer)
+      rescue IndexerClients::Base::Error => e
+        Rails.logger.warn "[IndexerClients::Prowlarr] Failed to read seed criteria for indexer #{indexer_id}: #{e.message}"
+        nil
+      end
+
       # Indexers Prowlarr would search on our behalf: every configured indexer,
       # or only the tagged subset when prowlarr_tags is set. Returns nil when
       # Prowlarr's indexer list cannot be read.
@@ -121,6 +142,32 @@ module IndexerClients
         []
       end
 
+      # Prowlarr stores indexer configuration as a flat array of name/value
+      # field hashes. A field carries no "value" key at all when the setting is
+      # empty, which means "use the download client default" and must stay nil.
+      def extract_seed_criteria(indexer)
+        fields = Array(indexer["fields"])
+        ratio = seed_field_value(fields, "torrentBaseSettings.seedRatio")
+        seed_time = seed_field_value(fields, "torrentBaseSettings.seedTime")
+
+        return nil if ratio.nil? && seed_time.nil?
+
+        { ratio: ratio&.to_f, seed_time: seed_time&.to_i }
+      end
+
+      def seed_field_value(fields, name)
+        field = fields.find { |candidate| candidate.is_a?(Hash) && candidate["name"] == name }
+        return nil unless field
+
+        value = field["value"]
+        return nil if value.nil? || value.to_s.strip.blank?
+
+        numeric = Float(value, exception: false)
+        return nil if numeric.nil? || numeric <= 0
+
+        numeric
+      end
+
       def normalized_indexer_tags(tags)
         tags.to_a.flat_map do |tag|
           case tag
@@ -173,6 +220,7 @@ module IndexerClients
           title: item["title"],
           indexer: item["indexer"],
           size_bytes: item["size"],
+          indexer_id: item["indexerId"],
           seeders: item["seeders"],
           leechers: item["leechers"],
           download_url: extract_download_url(item),

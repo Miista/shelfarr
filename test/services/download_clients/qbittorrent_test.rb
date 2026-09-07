@@ -1476,4 +1476,72 @@ class DownloadClients::QbittorrentTest < ActiveSupport::TestCase
       assert_equal "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", result
     end
   end
+
+  test "add_torrent sends share limits when seed criteria are supplied" do
+    VCR.turned_off do
+      stub_request(:post, "http://localhost:8080/api/v2/auth/login")
+        .to_return(
+          status: 200,
+          headers: { "Set-Cookie" => "SID=test_session_id; path=/" },
+          body: "Ok."
+        )
+
+      add_request = stub_request(:post, "http://localhost:8080/api/v2/torrents/add")
+        .with { |req| req.body.include?("ratioLimit=1.1") && req.body.include?("seedingTimeLimit=4320") }
+        .to_return(status: 200, body: "Ok.")
+
+      stub_request(:get, %r{http://localhost:8080/api/v2/torrents/info})
+        .to_return(status: 200, body: "[]", headers: { "Content-Type" => "application/json" })
+
+      @client.add_torrent("magnet:?xt=urn:btih:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+                          ratio_limit: 1.1, seeding_time_limit: 4320)
+
+      assert_requested add_request
+    end
+  end
+
+  test "add_torrent omits share limits when seed criteria are absent" do
+    VCR.turned_off do
+      stub_request(:post, "http://localhost:8080/api/v2/auth/login")
+        .to_return(
+          status: 200,
+          headers: { "Set-Cookie" => "SID=test_session_id; path=/" },
+          body: "Ok."
+        )
+
+      add_request = stub_request(:post, "http://localhost:8080/api/v2/torrents/add")
+        .with { |req| !req.body.include?("ratioLimit") && !req.body.include?("seedingTimeLimit") }
+        .to_return(status: 200, body: "Ok.")
+
+      stub_request(:get, %r{http://localhost:8080/api/v2/torrents/info})
+        .to_return(status: 200, body: "[]", headers: { "Content-Type" => "application/json" })
+
+      @client.add_torrent("magnet:?xt=urn:btih:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")
+
+      assert_requested add_request
+    end
+  end
+
+  test "add_torrent omits non-positive share limits rather than stopping the torrent immediately" do
+    VCR.turned_off do
+      stub_request(:post, "http://localhost:8080/api/v2/auth/login")
+        .to_return(
+          status: 200,
+          headers: { "Set-Cookie" => "SID=test_session_id; path=/" },
+          body: "Ok."
+        )
+
+      add_request = stub_request(:post, "http://localhost:8080/api/v2/torrents/add")
+        .with { |req| !req.body.include?("ratioLimit") && !req.body.include?("seedingTimeLimit") }
+        .to_return(status: 200, body: "Ok.")
+
+      stub_request(:get, %r{http://localhost:8080/api/v2/torrents/info})
+        .to_return(status: 200, body: "[]", headers: { "Content-Type" => "application/json" })
+
+      @client.add_torrent("magnet:?xt=urn:btih:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+                          ratio_limit: 0, seeding_time_limit: 0)
+
+      assert_requested add_request
+    end
+  end
 end
